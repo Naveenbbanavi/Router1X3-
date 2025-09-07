@@ -60,7 +60,6 @@ begin
 case(fifo_addr) 
 2'b00 : write_enb = 3'b001; 
 2'b01 : write_enb = 3'b010; 
-9  
 2'b10 : write_enb = 3'b100; 
 default : write_enb = 3'b0; 
 endcase 
@@ -195,8 +194,7 @@ resetn_tb,
 detect_add_tb, 
 write_enb_reg_tb, 
 read_enb_0_tb, 
-read_enb_1_tb, 
-11  
+read_enb_1_tb,  
 read_enb_2_tb, 
 empty_0_tb, 
 empty_1_tb, 
