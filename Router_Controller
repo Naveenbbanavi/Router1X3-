@@ -1,0 +1,303 @@
+module router_fsm(input clock, 
+resetn, 
+pkt_valid, 
+parity_done, 
+soft_reset_0, 
+soft_reset_1, 
+soft_reset_2, 
+fifo_full, 
+low_pkt_valid, 
+fifo_empty_0, 
+fifo_empty_1, 
+fifo_empty_2, 
+input [1:0] data_in, 
+output busy, 
+detect_add, 
+ld_state, 
+laf_state, 
+full_state, 
+write_enb_reg, 
+rst_int_reg, 
+lfd_state); 
+ 
+parameter DECODE_ADDRESS = 3'b000, 
+LOAD_FIRST_DATA = 3'b001, 
+LOAD_DATA = 3'b010, 
+FIFO_FULL_STATE =3'b011, 
+LOAD_AFTER_FULL = 3'b100, 
+LOAD_PARITY = 3'b101, 
+CHECK_PARITY_ERROR = 3'b110, 
+WAIT_TILL_EMPTY = 3'b111; 
+ 
+reg [1:0] addr; 
+reg [2:0] present_state, next_state; 
+ 
+// Present State Logic 
+always@(posedge clock) 
+begin 
+if(!resetn) 
+present_state <= DECODE_ADDRESS; 
+else if((soft_reset_0 && data_in == 2'b00)|| (soft_reset_1 && data_in == 2'b01) 
+|| (soft_reset_2 && data_in == 2'b10)) 
+present_state <= DECODE_ADDRESS; 
+else 
+present_state <= next_state; 
+end 
+ 
+// Logic for storing the address 
+always@(posedge clock) 
+begin 
+if(!resetn) 
+addr <= 0; 
+else if((soft_reset_0 && data_in == 2'b00)|| (soft_reset_1 && data_in == 2'b01) 
+|| (soft_reset_2 && data_in == 2'b10)) 
+addr <= 0; 
+if(present_state == DECODE_ADDRESS && data_in!= 2'b11) 
+addr <= data_in; 
+end 
+// Next State Logic 
+always@(*) 
+begin 
+if(addr != 2'b11) 
+begin 
+next_state = DECODE_ADDRESS; 
+case(present_state) 
+DECODE_ADDRESS: begin 
+if((pkt_valid && (data_in[1:0]==0) && fifo_empty_0) || 
+(pkt_valid && (data_in[1:0]==1) && fifo_empty_1) || 
+(pkt_valid && (data_in[1:0]==2) && fifo_empty_2)) 
+next_state = LOAD_FIRST_DATA; 
+else if((pkt_valid && (data_in[1:0]==0) && !fifo_empty_0) || 
+(pkt_valid && (data_in[1:0]==1) && !fifo_empty_1) || 
+(pkt_valid && (data_in[1:0]==2) && !fifo_empty_2)) 
+next_state = WAIT_TILL_EMPTY; 
+end 
+LOAD_FIRST_DATA: next_state = LOAD_DATA; 
+LOAD_DATA: begin 
+if(fifo_full) 
+next_state = FIFO_FULL_STATE; 
+else if(!fifo_full && !pkt_valid) 
+next_state = LOAD_PARITY; 
+else 
+next_state = LOAD_DATA; 
+end 
+FIFO_FULL_STATE: begin 
+if(!fifo_full) 
+next_state = LOAD_AFTER_FULL; 
+else 
+next_state = FIFO_FULL_STATE; 
+end 
+LOAD_AFTER_FULL: begin 
+if(!parity_done && !low_pkt_valid) 
+next_state = LOAD_DATA; 
+else if(!parity_done && low_pkt_valid) 
+next_state = LOAD_PARITY; 
+else if(parity_done) 
+next_state = DECODE_ADDRESS; 
+end 
+LOAD_PARITY : next_state = CHECK_PARITY_ERROR; 
+CHECK_PARITY_ERROR: if(fifo_full) 
+next_state = FIFO_FULL_STATE; 
+WAIT_TILL_EMPTY: begin 
+if((fifo_empty_0 && (addr == 0)) || 
+(fifo_empty_1 && (addr == 1)) || 
+(fifo_empty_2 && (addr == 2))) 
+next_state = LOAD_FIRST_DATA; 
+else 
+next_state = WAIT_TILL_EMPTY; 
+ 
+ 
+end 
+end 
+default : next_state = DECODE_ADDRESS; 
+endcase 
+else 
+next_state = DECODE_ADDRESS; 
+end 
+ 
+// Logic for output logic 
+assign detect_add = (present_state == DECODE_ADDRESS) ? 1'b1 : 1'b0; 
+assign ld_state = (present_state == LOAD_DATA) ? 1'b1 : 1'b0; 
+assign lfd_state = (present_state == LOAD_FIRST_DATA) ? 1'b1 : 1'b0; 
+assign laf_state = (present_state == LOAD_AFTER_FULL) ? 1'b1 : 1'b0; 
+assign full_state = (present_state == FIFO_FULL_STATE) ? 1'b1 : 1'b0; 
+assign write_enb_reg = ((present_state == LOAD_DATA) || 
+(present_state == LOAD_AFTER_FULL) || 
+(present_state == LOAD_PARITY)) ? 1'b1 : 1'b0; 
+assign rst_int_reg = (present_state == CHECK_PARITY_ERROR) ? 1'b1 : 1'b0; 
+assign busy = ((present_state == LOAD_DATA) || (present_state == DECODE_ADDRESS)) ? 
+1'b0 : 1'b1;  
+endmodule 
+
+//Simulation Code: 
+module router_fsm_tb(); 
+reg clock_tb, 
+resetn_tb,pkt_valid_tb,parity_done_tb,soft_reset_0_tb,soft_reset_1_tb,soft_reset_2_tb,f 
+ifo_full_tb,low_pkt_valid_tb,fifo_empty_0_tb,fifo_empty_1_tb,fifo_empty_2_tb; 
+reg [1:0] data_in_tb; 
+wire 
+busy_tb,detect_add_tb,ld_state_tb,laf_state_tb,full_state_tb,write_enb_reg_tb,rst_int_r 
+eg_tb,lfd_state_tb; 
+parameter T = 10, ADDRESS = 2'd1; 
+router_fsm DUT(clock_tb, 
+resetn_tb, 
+pkt_valid_tb, 
+parity_done_tb, 
+soft_reset_0_tb, 
+soft_reset_1_tb, 
+soft_reset_2_tb, 
+fifo_full_tb, 
+low_pkt_valid_tb, 
+fifo_empty_0_tb, 
+fifo_empty_1_tb, 
+fifo_empty_2_tb, 
+data_in_tb, 
+busy_tb, 
+detect_add_tb, 
+ld_state_tb, 
+laf_state_tb, 
+full_state_tb, 
+write_enb_reg_tb, 
+rst_int_reg_tb, 
+lfd_state_tb); 
+ 
+ 
+initial 
+begin 
+clock_tb = 1'b0; 
+forever #(T/2) clock_tb = ~clock_tb; 
+end 
+ 
+task resetn_ip; 
+begin 
+@(negedge clock_tb); 
+resetn_tb = 1'b0; 
+@(negedge clock_tb); 
+resetn_tb = 1'b1; 
+end 
+endtask 
+ 
+task soft_reset_ip(input [2:0] j); 
+begin 
+@(negedge clock_tb); 
+soft_reset_0_tb = j[0]; 
+soft_reset_1_tb = j[1]; 
+soft_reset_2_tb = j[2]; 
+@(negedge clock_tb); 
+soft_reset_0_tb = 0; 
+soft_reset_1_tb = 0; 
+soft_reset_2_tb = 0; 
+end 
+endtask 
+ 
+task initialize; 
+begin 
+18  
+resetn_tb = 1'b1; 
+pkt_valid_tb = 1'b0; 
+parity_done_tb = 1'b0; 
+soft_reset_0_tb = 1'b0; 
+soft_reset_1_tb = 1'b0; 
+soft_reset_2_tb = 1'b0; 
+fifo_full_tb = 1'b0; 
+low_pkt_valid_tb = 1'b0; 
+fifo_empty_0_tb = 1'b0; 
+fifo_empty_1_tb = 1'b0; 
+fifo_empty_2_tb = 1'b0; 
+end 
+endtask 
+ 
+task DA_LFD_LD_LP_CPE_DA; 
+begin 
+pkt_valid_tb = 1'b1; 
+data_in_tb = 2'b01; 
+fifo_empty_1_tb = 1'b1; 
+#20 pkt_valid_tb = 1'b0; 
+low_pkt_valid_tb = 1'b1; 
+#20 fifo_empty_1_tb = 1'b0; 
+low_pkt_valid_tb = 1'b0; 
+end 
+endtask 
+ 
+task DA_LFD_LD_FFS_LAF_LP_CPE_DA; 
+begin 
+pkt_valid_tb = 1'b1; 
+data_in_tb = 2'b10; 
+fifo_empty_2_tb = 1'b1; 
+#40 fifo_full_tb = 1'b1; 
+pkt_valid_tb = 1'b0; 
+low_pkt_valid_tb = 1'b1; 
+#30 fifo_full_tb = 1'b0; 
+parity_done_tb = 1'b0; 
+#50 low_pkt_valid_tb = 1'b0; 
+fifo_empty_2_tb = 1'b0; 
+end 
+endtask 
+ 
+task DA_LFD_LD_FFS_LAF_LD_LP_CPE_DA; 
+begin 
+pkt_valid_tb = 1'b1; 
+data_in_tb = 2'b00; 
+fifo_empty_0_tb = 1'b1; 
+#40 fifo_full_tb = 1'b1; 
+#30 fifo_full_tb = 1'b0; 
+#30 pkt_valid_tb = 1'b0; 
+low_pkt_valid_tb = 1'b1; 
+#20 fifo_empty_0_tb = 1'b0; 
+low_pkt_valid_tb = 1'b0; 
+end 
+endtask 
+ 
+task DA_LFD_LD_LP_CPE_FFS_LAF_DA; 
+begin 
+pkt_valid_tb = 1'b1; 
+data_in_tb = 2'b10; 
+fifo_empty_2_tb = 1'b1; 
+#50 pkt_valid_tb = 1'b0; 
+low_pkt_valid_tb = 1'b1; 
+#10 fifo_full_tb = 1'b1; 
+#10 parity_done_tb = 1'b1; 
+#20 fifo_full_tb = 1'b0; 
+#50 parity_done_tb = 1'b0; 
+low_pkt_valid_tb = 1'b0; 
+19  
+fifo_empty_2_tb = 1'b0; 
+end 
+endtask 
+ 
+task DA_WTE_LFD_LD_LP_CPE_DA; 
+begin 
+pkt_valid_tb = 1'b1; 
+data_in_tb = 2'b00; 
+fifo_empty_0_tb = 1'b0; 
+#40 fifo_empty_0_tb = 1'b1; 
+#20 pkt_valid_tb = 1'b0; 
+low_pkt_valid_tb = 1'b1; 
+#20 fifo_empty_0_tb = 1'b0; 
+low_pkt_valid_tb = 1'b0; 
+end 
+endtask 
+ 
+initial 
+begin 
+initialize; 
+#20; 
+resetn_ip; 
+#20; 
+data_in_tb = ADDRESS; 
+soft_reset_ip(3'b010); 
+#20; 
+DA_LFD_LD_LP_CPE_DA; 
+#100; 
+DA_WTE_LFD_LD_LP_CPE_DA; 
+#100; 
+DA_LFD_LD_FFS_LAF_LP_CPE_DA; 
+#100; 
+DA_LFD_LD_FFS_LAF_LD_LP_CPE_DA; 
+#100; 
+DA_LFD_LD_LP_CPE_FFS_LAF_DA; 
+#100; 
+$finish; 
+end 
+ 
+endmodule
